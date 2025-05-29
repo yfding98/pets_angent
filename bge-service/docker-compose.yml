@@ -1,0 +1,26 @@
+services:
+  bge-m3-service:
+    container_name: bge-m3
+    image: registry.mthreads.com/mcconline/musa-pytorch-release-public:rc3.1.0-v1.3.0-S4000-py38
+    privileged: true
+    ipc: host
+    shm_size: "80gb"
+    working_dir: /workspace
+    entrypoint: []
+    environment:
+      - MTHREADS_VISIBLE_DEVICES=all
+      - MODEL_PATH=/models/bge-m3-xorbits
+      - PORT=8000
+    volumes:
+      - /data/models:/models
+      - /data/dyf/workspace/pets_agents/bge-service:/workspace
+    command: ["python", "app/main.py", "--port", "${PORT}", "--model-path", "${MODEL_PATH}"]
+    ports:
+      - "8001:8000"
+    networks:
+      - ragflow
+
+
+networks:
+  ragflow:
+    driver: bridge
