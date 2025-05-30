@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-from models import BgeM3Model
+from models import BGEM3FlagWrapper
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description="启动 BgeM3 服务")
@@ -12,7 +12,7 @@ parser.add_argument("--model-path", type=str, default="BAAI/bge-m3", help="模�
 args = parser.parse_args()
 
 app = FastAPI()
-model = BgeM3Model(args.model_path)
+model = BGEM3FlagWrapper(args.model_path)
 
 class EmbeddingRequest(BaseModel):
     input: List[str]

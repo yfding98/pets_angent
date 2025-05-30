@@ -10,7 +10,7 @@ services:
     entrypoint: []
     environment:
       - MTHREADS_VISIBLE_DEVICES=all
-      - MODEL_PATH=/models/bge-m3-xorbits
+      - MODEL_PATH=/models/bge-m3-xorbits/
     volumes:
       - /data/models:/models
       - /data/dyf/workspace/pets_angent/bge-service:/workspace
@@ -25,9 +25,9 @@ services:
     ports:
       - "8001:8000"
     networks:
-      - ragflow
+      - docker_ragflow
 
 
 networks:
-  ragflow:
-    driver: bridge
+  docker_ragflow:
+    external: true
