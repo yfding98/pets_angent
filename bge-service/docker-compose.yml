@@ -11,11 +11,17 @@ services:
     environment:
       - MTHREADS_VISIBLE_DEVICES=all
       - MODEL_PATH=/models/bge-m3-xorbits
-      - PORT=8000
     volumes:
       - /data/models:/models
       - /data/dyf/workspace/pets_angent/bge-service:/workspace
-    command: ["python", "app/main.py", "--port", "${PORT}", "--model-path", "${MODEL_PATH}"]
+    # command: ["python", "app/main.py", "--port", "${PORT}", "--model-path", "${MODEL_PATH}"]
+    command:
+      - /bin/bash
+      - -c
+      - |
+        python app/main.py \
+        --port 8000 \
+        --model-path ${MODEL_PATH}
     ports:
       - "8001:8000"
     networks:
