@@ -15,7 +15,7 @@ class BGEM3FlagWrapper:
             device=self.device
         )
 
-    def encode(self, texts):
+    def encode(self, texts, batch_size=512, max_length=8192):
         # 调用 FlagEmbedding 的 encode 方法
-        embeddings = self.model.encode(texts)
+        embeddings = self.model.encode(texts,batch_size, max_length)
         return embeddings  # FlagEmbedding 默认返回 numpy 数组，无需额外转换
