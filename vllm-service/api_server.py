@@ -1,10 +1,11 @@
 import asyncio
 import importlib
 import inspect
+import json
 import re
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Any, Set
+from typing import Any, Set, Optional
 
 import fastapi
 import uvicorn
@@ -94,19 +95,44 @@ async def show_version():
 
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest,
-                                 raw_request: Request):
-    generator = await openai_serving_chat.create_chat_completion(
-        request, raw_request)
+async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
+    # 获取 session_id 和 conversation_id（从 header）
+    session_id: Optional[str] = raw_request.headers.get("session-id")
+    conversation_id: Optional[str] = raw_request.headers.get("conversation-id")
+
+    # 调用原始 vLLM 的 chat completion 方法
+    generator = await openai_serving_chat.create_chat_completion(request, raw_request)
+
     if isinstance(generator, ErrorResponse):
-        return JSONResponse(content=generator.model_dump(),
-                            status_code=generator.code)
+        return JSONResponse(
+            content={
+                "session_id": session_id,
+                # "conversation_id": conversation_id,
+                "error": generator.model_dump()
+            },
+            status_code=generator.code
+        )
+
     if request.stream:
-        return StreamingResponse(content=generator,
-                                 media_type="text/event-stream")
+        async def stream_wrapper():
+            async for item in generator:
+                item_dict = item.model_dump()
+
+                item_dict["session_id"] = session_id
+                # item_dict["conversation_id"] = conversation_id
+
+                yield f"data: {json.dumps(item_dict, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
+
     else:
         assert isinstance(generator, ChatCompletionResponse)
-        return JSONResponse(content=generator.model_dump())
+        response_data = generator.model_dump()
+
+        response_data["session_id"] = session_id
+        # response_data["conversation_id"] = conversation_id
+
+        return JSONResponse(content=response_data)
 
 
 @app.post("/v1/completions")
