@@ -19,7 +19,7 @@ class EmbeddingRequest(BaseModel):
 
 @app.post("/v1/embeddings")
 async def get_embeddings(request: EmbeddingRequest):
-    embeddings = model.encode(request.input)
+    embeddings = model.encode(request.input,batch_size=512, max_length=8192)['dense_vecs']
     return {
         "data": [{"embedding": emb.tolist()} for emb in embeddings],
         "model": "bge-m3",
