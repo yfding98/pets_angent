@@ -93,11 +93,13 @@ async def show_version():
     ver = {"version": vllm.__version__}
     return JSONResponse(content=ver)
 
+class ChatCompletionRequestSession(ChatCompletionRequest):
+    session_id: Optional[str] = None
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
+async def create_chat_completion(request: ChatCompletionRequestSession, raw_request: Request):
     # 获取 session_id 和 conversation_id（从 header）
-    session_id: Optional[str] = raw_request.headers.get("session_id")
+    session_id: Optional[str] = request.session_id
     # business_type  = raw_request.headers.get("business_type")
     # conversation_id: Optional[str] = raw_request.headers.get("conversation_id")
 

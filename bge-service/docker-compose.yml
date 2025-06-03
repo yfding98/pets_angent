@@ -21,7 +21,7 @@ services:
       - |
         python app/main.py \
         --port 8000 \
-        --model-path ${MODEL_PATH}
+        --model-path /models/bge-m3-xorbits/
     ports:
       - "8001:8000"
     networks:

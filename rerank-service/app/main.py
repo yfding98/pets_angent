@@ -10,8 +10,6 @@ parser.add_argument("--port", type=int, default=8000, help="服务监听端口")
 parser.add_argument("--model-path", type=str, default="BAAI/bge-m3", help="模型路径")
 args = parser.parse_args()
 app = FastAPI()
-model = BGERerankerWrapper(model_path=args.model_path,)
-
 class RerankRequest(BaseModel):
     query: str
     documents: List[str]
@@ -25,6 +23,12 @@ async def rerank_documents(request: RerankRequest):
         "usage": {"total_pairs": len(request.documents)}
     }
 
+
+@app.on_event("startup")
+def load_model():
+    global model
+    model = BGERerankerWrapper(model_path=args.model_path)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run("main:app", host="0.0.0.0", port=args.port, reload=False)
