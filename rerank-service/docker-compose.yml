@@ -1,0 +1,29 @@
+services:
+  bge-reranker-service:
+    container_name: bge-reranker
+    build: .
+    image: ding/mcconline/musa-pytorch-release-public:rc3.1.0-v1.3.0-S4000-py38
+    privileged: true
+    ipc: host
+    shm_size: "80gb"
+    working_dir: /workspace
+    entrypoint: []
+    ports:
+      - "8002:8000"
+    environment:
+      - MODEL_PATH=/models/bge-reranker-v2-m3
+      - MTHREADS_VISIBLE_DEVICES=all
+    volumes:
+      - /data/models:/models
+      - /data/dyf/workspace/pets_angent/bge-service:/workspace
+    command:
+      - /bin/bash
+      - -c
+      - |
+        python app/main.py \
+        --port 8000 \
+        --model-path /models/bge-reranker-v2-m3
+
+networks:
+  docker_ragflow:
+    external: true

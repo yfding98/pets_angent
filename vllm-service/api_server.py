@@ -97,8 +97,9 @@ async def show_version():
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
     # 获取 session_id 和 conversation_id（从 header）
-    session_id: Optional[str] = raw_request.headers.get("session-id")
-    conversation_id: Optional[str] = raw_request.headers.get("conversation-id")
+    session_id: Optional[str] = raw_request.headers.get("session_id")
+    # business_type  = raw_request.headers.get("business_type")
+    # conversation_id: Optional[str] = raw_request.headers.get("conversation_id")
 
     # 调用原始 vLLM 的 chat completion 方法
     generator = await openai_serving_chat.create_chat_completion(request, raw_request)
