@@ -95,22 +95,34 @@ async def show_version():
 
 class ChatCompletionRequestSession(ChatCompletionRequest):
     session_id: Optional[str] = None
+    business_type: Optional[str] = None
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequestSession, raw_request: Request):
-    # 获取 session_id 和 conversation_id（从 header）
-    session_id: Optional[str] = request.session_id
-    # business_type  = raw_request.headers.get("business_type")
-    # conversation_id: Optional[str] = raw_request.headers.get("conversation_id")
+    session_id = request.session_id
+    business_type = request.business_type
+    prompt_map = {
+        "Disease": "疾病咨询",
+        "Medication": "用药建议",
+        "Dietary": "饮食分析",
+        "Beauty": "美容指导",
+        "FirstAid": "急救",
+        "Training": "训练",
+        "Deworming": "驱虫指导"
+    }
 
-    # 调用原始 vLLM 的 chat completion 方法
+    # 在messages中的 system 角色的 content中， 添加 prompt_map[business_type] 的的提示
+    if business_type in prompt_map and request.messages[0]["role"] == "system":
+        request.messages[0]["content"] = (request.messages[0]["content"] + ",你是一个在宠物的" + prompt_map[business_type]+
+                                       "领域有着数十年经验的专家，请你从该领域出发给出用户需要的知识和帮助")
+
     generator = await openai_serving_chat.create_chat_completion(request, raw_request)
 
     if isinstance(generator, ErrorResponse):
         return JSONResponse(
             content={
                 "session_id": session_id,
-                # "conversation_id": conversation_id,
                 "error": generator.model_dump()
             },
             status_code=generator.code
@@ -118,25 +130,41 @@ async def create_chat_completion(request: ChatCompletionRequestSession, raw_requ
 
     if request.stream:
         async def stream_wrapper():
-            async for item in generator:
-                item_dict = item.model_dump()
-
-                item_dict["session_id"] = session_id
-                # item_dict["conversation_id"] = conversation_id
-
-                yield f"data: {json.dumps(item_dict, ensure_ascii=False)}\n\n"
+            try:
+                async for item in generator:
+                    if isinstance(item, str):
+                        # 处理已序列化的字符串
+                        logger.debug(f"Received string: {item}")
+                        try:
+                            data = json.loads(item[6:])  # 去掉 "data: "
+                        except Exception:
+                            yield item  # 原样返回
+                            continue
+                        data["session_id"] = session_id
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    else:
+                        # 处理 Pydantic 模型
+                        item_dict = item.model_dump()
+                        item_dict["session_id"] = session_id
+                        yield f"data: {json.dumps(item_dict, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                # 客户端中断连接，属于正常行为，仅记录 info 日志
+                logger.info("Client disconnected during streaming.")
+                # 必须重新 raise，否则 uvicorn 会卡住
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error during streaming: {e}", exc_info=True)
+                # 可选：发送错误信息给前端
+                yield f"data: {json.dumps({'error': 'Internal server error'}, ensure_ascii=False)}\n\n"
+                raise
 
         return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
 
     else:
         assert isinstance(generator, ChatCompletionResponse)
         response_data = generator.model_dump()
-
         response_data["session_id"] = session_id
-        # response_data["conversation_id"] = conversation_id
-
         return JSONResponse(content=response_data)
-
 
 @app.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):

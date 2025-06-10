@@ -1,0 +1,26 @@
+services:
+  agent-service:
+    container_name: agent-service
+    build: .
+    image: ding/pets/agent-service-py11:v1.0.0
+    privileged: true
+    ipc: host
+    shm_size: "80gb"
+    working_dir: /workspace
+    entrypoint: []
+    environment:
+      - MTHREADS_VISIBLE_DEVICES=all
+    command:
+      - /bin/bash
+      - -c
+      - |
+        python app/main.py --port  8000
+    ports:
+      - "8010:8000"
+    networks:
+      - docker_ragflow
+
+
+networks:
+  docker_ragflow:
+    external: true
