@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 import json
+import random
+
 import httpx
 import yaml
 from fastapi import FastAPI, Request, HTTPException
@@ -9,7 +11,7 @@ import uvicorn
 import requests
 from httpx import AsyncClient
 
-from schema import ChatCompletionRequest
+from schema import ChatCompletionRequest, ChatCompletionImageRequest, ServerConfig
 
 app = FastAPI()
 
@@ -18,60 +20,69 @@ parser.add_argument("--port", type=int, default=8000, help="服务监听端口")
 args = parser.parse_args()
 
 
-# def load_config(file_path="config.yaml"):
-#     try:
-#         with open(file_path, "r") as f:
-#             return yaml.safe_load(f)
-#     except Exception as e:
-#         print(e)
-#
-# config = load_config()
+def load_config(file_path="config.yaml"):
+    try:
+        with open(file_path, "r") as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        print(e)
 
+config = load_config()
+
+VLLM_CHAT_SERVER = ServerConfig(**config["server"]["VLLM_CHAT_SERVER"])
+VLLM_IMAGE_SERVER = ServerConfig(**config["server"]["VLLM_IMAGE_SERVER"])
+CALLBACK_SERVER = ServerConfig(**config["server"]["CALLBACK_SERVER"])
 
 @app.post("/pets/images-recognize")
-async def images_recognize(url: str, recognizeId: str, scene: str):
+async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     prompts_map = {
-        "emotion_analysis": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detection_results,emotion,correlation_score,reason,suggestion!",
+        "emotion_analysis": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detection_results,emotion,correlation_score(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
         "breed_analysis": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
     }
-    api =  "http://10.1.0.216:8020/v1/chat/completions"
     headers = {
         "Content-Type": "application/json"
     }
-    data = {
-        "model": "Qwen2.5-VL-72B-Instruct",
-        "messages": [
-            {"role": "system", "content": [{"type": "text", "text": "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ prompts_map[scene]}]},
-            {"role": "user", "content": [
-                {"type": "image_url", "image_url": {
-                    "url": url}}
-            ]}
-        ]
-    }
+    client_data = await raw_request.json()
 
-    response = requests.post(api, json=data, headers=headers)
+    # 提取 session_id 和 business_type
+    session_id = client_data.get("recognizeId", "")
+    scene = client_data.get("scene", "")
+
+    # 构造转发给 vLLM 的 payload（去掉中间层字段）
+    vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
+
+    system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ prompts_map[scene]
+
+    if vllm_payload["messages"][0]["role"] != "system":
+        # 往messages列表的首位插入系统角色消息
+        vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
+    elif vllm_payload["messages"][0]["role"] == "system":
+        original_content = vllm_payload["messages"][0]["content"]
+        vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
+
+    response = requests.post(VLLM_IMAGE_SERVER.url, json=vllm_payload, headers=headers)
 
     result = response.json()
     result = result["choices"][0]["message"]["content"]
     json_str = result.strip("```json").strip("```").strip()
     result = json.loads(json_str)
-    print(recognizeId)
+
+    # 给 correlation_score 分数添加噪声
+    if "correlation_score" in result:
+        for key,  value in result["correlation_score"].items():
+            if 5 <= value <= 95:
+                result["correlation_score"][key] += int(random.uniform(-5, 5))
+
 
     result_ ={
         "scene":scene,
-        "recognizeId":recognizeId,
+        "recognizeId":session_id,
         "result":result
     }
 
     # 回调接口
-    # requests.post("http://10.1.0.216:8020/v1/recognize/callback", json=result_)
-    return result
-
-@app.get("/test")
-async def test_vllm():
-    async with httpx.AsyncClient() as client:
-        resp = await client.get("http://10.1.0.222:8080/v1/models")
-        return resp.json()
+    requests.post(CALLBACK_SERVER.url, json=result_)
+    # return result
 
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
@@ -79,7 +90,6 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
     中间服务接口，代理到 vLLM 的 /v1/chat/completions。
     支持流式输出和 session_id 透传。
     """
-    VLLM_API_URL = "http://10.1.0.222:8080/v1/chat/completions"
     client_data = await raw_request.json()
 
     # 提取 session_id 和 business_type
@@ -114,8 +124,8 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
         async def upstream_stream():
             async with AsyncClient() as client:
                 async with client.stream(
-                        method="POST",
-                        url=VLLM_API_URL,
+                        method=VLLM_CHAT_SERVER.method,
+                        url=VLLM_CHAT_SERVER.url,
                         json=vllm_payload,
                         headers={"Content-Type": "application/json"},
                         timeout=600
@@ -148,7 +158,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
     else:
         async with AsyncClient() as client:
             response = await client.post(
-                VLLM_API_URL,
+                VLLM_CHAT_SERVER.url,
                 json=vllm_payload,
                 headers={"Content-Type": "application/json"},
                 timeout=600

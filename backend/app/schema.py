@@ -4,6 +4,10 @@ from openai.types.evals.create_eval_completions_run_data_source import SamplingP
 from pydantic import BaseModel, ConfigDict, Field
 from openai.types.chat import ChatCompletionMessageParam
 
+class ServerConfig(BaseModel):
+    method:  str = "llama"
+    url: str = ""
+
 
 class OpenAIBaseModel(BaseModel):
     # OpenAI API does not allow extra fields
@@ -17,5 +21,11 @@ class ChatCompletionRequest(OpenAIBaseModel):
     session_id:  Optional[str] = None
     business_type: Optional[str] = None
     stream: Optional[bool] = False
+    model:  str
+    messages: List[ChatCompletionMessageParam]
+
+class ChatCompletionImageRequest(OpenAIBaseModel):
+    recognizeId:  Optional[str] = None
+    scene: Optional[str] = None
     model:  str
     messages: List[ChatCompletionMessageParam]
