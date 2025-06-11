@@ -36,14 +36,13 @@ CALLBACK_SERVER = ServerConfig(**config["server"]["CALLBACK_SERVER"])
 @app.post("/v1/pets/images-recognize")
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     prompts_map = {
-        "emotion": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detection_results,emotion,correlation_score(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
+        "emotion": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults,emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
         "breed": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
     }
     headers = {
         "Content-Type": "application/json"
     }
     client_data = await raw_request.json()
-
     # 提取 session_id 和 business_type
     session_id = client_data.get("recognizeId", "")
     scene = client_data.get("scene", "")
@@ -68,8 +67,8 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
     result = json.loads(json_str)
 
     # 给 correlation_score 分数添加噪声
-    if "correlation_score" in result:
-        for key,  value in result["correlation_score"].items():
+    if "correlationScore" in result:
+        for key,  value in result["correlationScore"].items():
             if 5 <= value <= 95:
                 result["correlation_score"][key] += int(random.uniform(-5, 5))
 
@@ -82,7 +81,7 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
 
     # 回调接口
     requests.post(CALLBACK_SERVER.url, json=result_)
-    # return result
+    return JSONResponse(content={}, status_code=200)
 
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
