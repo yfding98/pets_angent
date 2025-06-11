@@ -101,21 +101,6 @@ class ChatCompletionRequestSession(ChatCompletionRequest):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequestSession, raw_request: Request):
     session_id = request.session_id
-    business_type = request.business_type
-    prompt_map = {
-        "Disease": "疾病咨询",
-        "Medication": "用药建议",
-        "Dietary": "饮食分析",
-        "Beauty": "美容指导",
-        "FirstAid": "急救",
-        "Training": "训练",
-        "Deworming": "驱虫指导"
-    }
-
-    # 在messages中的 system 角色的 content中， 添加 prompt_map[business_type] 的的提示
-    if business_type in prompt_map and request.messages[0]["role"] == "system":
-        request.messages[0]["content"] = (request.messages[0]["content"] + ",你是一个在宠物的" + prompt_map[business_type]+
-                                       "领域有着数十年经验的专家，请你从该领域出发给出用户需要的知识和帮助")
 
     generator = await openai_serving_chat.create_chat_completion(request, raw_request)
 

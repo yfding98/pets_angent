@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 import requests
+from httpx import AsyncClient
 
 from schema import ChatCompletionRequest
 
@@ -106,63 +107,59 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
         original_content = vllm_payload["messages"][0]["content"]
         vllm_payload["messages"][0]["content"] = original_content + "\n" + prompt_map.get(business_type, default_prompt)
 
-    # 使用 httpx 异步转发请求
-    async with httpx.AsyncClient() as client:
-        headers = {"Content-Type": "application/json"}
-        response = await client.post(
-            VLLM_API_URL,
-            json=vllm_payload,
-            headers=headers,
-            timeout=600
+
+    is_streaming = vllm_payload.get("stream", False)
+
+    if is_streaming:
+        async def upstream_stream():
+            async with AsyncClient() as client:
+                async with client.stream(
+                        method="POST",
+                        url=VLLM_API_URL,
+                        json=vllm_payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=600
+                ) as response:
+
+                    if response.status_code != 200:
+                        raise HTTPException(status_code=response.status_code, detail="Upstream error")
+
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+
+                        if line.startswith("data:"):
+                            try:
+                                data_str = line[5:].strip()
+                                data = json.loads(data_str)
+                                data["session_id"] = session_id
+                                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                            except json.JSONDecodeError:
+                                yield f"{line}\n\n"
+                        else:
+                            yield f"{line}\n\n"
+
+        return StreamingResponse(
+            upstream_stream(),
+            media_type="text/event-stream",
+            headers={'X-Accel-Buffering': 'no'}
         )
 
-        if response.status_code != 200:
-            # logger.error(f"Backend error: {response.text}")
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+    else:
+        async with AsyncClient() as client:
+            response = await client.post(
+                VLLM_API_URL,
+                json=vllm_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=600
+            )
 
-        is_streaming = "text/event-stream" in response.headers.get("Content-Type", "")
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
 
-        if is_streaming:
-            async def stream_wrapper():
-                try:
-                    async for chunk in response.aiter_bytes():
-                        try:
-                            # 解析 chunk 并添加 session_id
-                            lines = chunk.decode().strip().split("\n")
-                            modified_lines = []
-                            for line in lines:
-                                if line.startswith("data:"):
-                                    data_str = line[5:].strip()
-                                    try:
-                                        data = json.loads(data_str)
-                                        data["session_id"] = session_id
-                                        modified_lines.append(f"data: {json.dumps(data, ensure_ascii=False)}")
-                                    except json.JSONDecodeError:
-                                        modified_lines.append(line)
-                                else:
-                                    modified_lines.append(line)
-                            yield "\n".join(modified_lines).encode() + b"\n\n"
-                        except Exception as e:
-                            # logger.error(f"Error processing streaming chunk: {e}")
-                            print(f"Error processing streaming chunk: {e}")
-                            continue
-                except asyncio.CancelledError:
-                    # logger.info("Client disconnected during streaming.")
-                    print("Client disconnected during streaming.")
-                    raise
-                except Exception as e:
-                    # logger.error(f"Unexpected error during streaming: {e}")
-                    print( f"Unexpected error during streaming: {e}")
-                    raise
-
-            return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
-
-        else:
             data = response.json()
             data["session_id"] = session_id
             return JSONResponse(content=data)
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":
