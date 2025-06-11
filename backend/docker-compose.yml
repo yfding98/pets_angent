@@ -14,7 +14,7 @@ services:
       - /bin/bash
       - -c
       - |
-        python app/main.py --port  8000
+        python main.py --port  8000
     ports:
       - "8010:8000"
     networks:
