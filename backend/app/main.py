@@ -1,13 +1,15 @@
 import argparse
+import asyncio
 import json
 import httpx
 import yaml
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 import requests
-from requests import Request
 
-from fastapi.responses import  StreamingResponse
+from backend.app.schema import ChatCompletionRequest
+
 app = FastAPI()
 
 parser = argparse.ArgumentParser(description="启动 模型接口处理 服务")
@@ -64,15 +66,20 @@ async def images_recognize(url: str, recognizeId: str, scene: str):
     # requests.post("http://10.1.0.216:8020/v1/recognize/callback", json=result_)
     return result
 
+@app.get("/test")
+async def test_vllm():
+    async with httpx.AsyncClient() as client:
+        resp = await client.get("http://10.1.0.222:8080/v1/models")
+        return resp.json()
 
 @app.post("/v1/chat/completions")
-async def proxy_chat_completions(request: Request):
+async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
     """
     中间服务接口，代理到 vLLM 的 /v1/chat/completions。
     支持流式输出和 session_id 透传。
     """
-    VLLM_CHAT_URL = "http://10.1.0.216:8080/v1/chat/completions"
-    client_data = await request.json()
+    VLLM_API_URL = "http://10.1.0.222:8080/v1/chat/completions"
+    client_data = await raw_request.json()
 
     # 提取 session_id 和 business_type
     session_id = client_data.get("session_id", "")
@@ -80,7 +87,7 @@ async def proxy_chat_completions(request: Request):
 
     # 构造转发给 vLLM 的 payload（去掉中间层字段）
     vllm_payload = {k: v for k, v in client_data.items() if k not in ["session_id", "business_type"]}
-
+    base_info ="你是petpal,来自杭州知几科技"
     # 添加业务类型提示词逻辑（可选）
     prompt_map = {
         "Disease": "你是专业的宠物兽医顾问。请根据用户描述的症状，提供可能的疾病分析、轻重缓急判断，并建议是否需要尽快就医。同时解释常见病因和初步护理建议。",
@@ -91,43 +98,69 @@ async def proxy_chat_completions(request: Request):
         "Training": "你是宠物行为训练师。请根据用户的宠物品种、年龄和训练目标（如定点上厕所、听指令、社交训练等），提供科学的行为训练建议，包括正向激励方式、常见误区、训练周期预估等。",
         "Deworming": "你是宠物寄生虫防治专家。请根据宠物的生活环境（室内/户外）、年龄、驱虫历史等情况，推荐合适的驱虫药品、频率及使用方法，并解释体内/体外寄生虫的危害与预防策略。"
     }
-
-    if vllm_payload["messages"][0]["role"] == "system":
+    default_prompt = ",是一个ai宠物助手,请根据用户的问题,给出最合适的回答。"
+    if vllm_payload["messages"][0]["role"] != "system":
+        # 往messages列表的首位插入系统角色消息
+        vllm_payload["messages"].insert(0, {"role": "system", "content": base_info +","+ prompt_map.get(business_type, default_prompt)})
+    elif vllm_payload["messages"][0]["role"] == "system":
         original_content = vllm_payload["messages"][0]["content"]
-        vllm_payload["messages"][0]["content"] = f"{original_content}\n{prompt_map.get(business_type,  "你是一个宠物助手，请根据用户的问题，给出最合适的回答。")}"
+        vllm_payload["messages"][0]["content"] = original_content + "\n" + prompt_map.get(business_type, default_prompt)
 
     # 使用 httpx 异步转发请求
-    async def generate():
-        async with httpx.AsyncClient(timeout=600.0) as client:
-            async with client.stream("POST", VLLM_CHAT_URL, json=vllm_payload, headers={"Content-Type": "application/json"}) as resp:
-                if resp.status_code != 200:
-                    # logger.error(f"Backend error: {resp.status_code}")
-                    yield json.dumps({"error": "Backend service error"}, ensure_ascii=False)
-                    return
+    async with httpx.AsyncClient() as client:
+        headers = {"Content-Type": "application/json"}
+        response = await client.post(
+            VLLM_API_URL,
+            json=vllm_payload,
+            headers=headers,
+            timeout=600
+        )
 
-                async for chunk in resp.aiter_bytes():
-                    if chunk:
+        if response.status_code != 200:
+            # logger.error(f"Backend error: {response.text}")
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        is_streaming = "text/event-stream" in response.headers.get("Content-Type", "")
+
+        if is_streaming:
+            async def stream_wrapper():
+                try:
+                    async for chunk in response.aiter_bytes():
                         try:
-                            # 如果是流式文本，直接传递
-                            decoded = chunk.decode('utf-8')
-                            if decoded.startswith("data:"):
-                                data_str = decoded[5:].strip()
-                                if data_str == "[DONE]":
-                                    yield f"data: {json.dumps({'session_id': session_id, 'done': True}, ensure_ascii=False)}\n\n"
-                                    continue
-                                try:
-                                    data_json = json.loads(data_str)
-                                    data_json["session_id"] = session_id
-                                    yield f"data: {json.dumps(data_json, ensure_ascii=False)}\n\n"
-                                except Exception as e:
-                                    # logger.warning(f"Failed to parse stream data: {e}")
-                                    yield decoded
-                            else:
-                                # 非标准格式，原样返回
-                                yield chunk
-                        except UnicodeDecodeError:
-                            # 二进制数据，直接返回
-                            yield chunk
+                            # 解析 chunk 并添加 session_id
+                            lines = chunk.decode().strip().split("\n")
+                            modified_lines = []
+                            for line in lines:
+                                if line.startswith("data:"):
+                                    data_str = line[5:].strip()
+                                    try:
+                                        data = json.loads(data_str)
+                                        data["session_id"] = session_id
+                                        modified_lines.append(f"data: {json.dumps(data, ensure_ascii=False)}")
+                                    except json.JSONDecodeError:
+                                        modified_lines.append(line)
+                                else:
+                                    modified_lines.append(line)
+                            yield "\n".join(modified_lines).encode() + b"\n\n"
+                        except Exception as e:
+                            # logger.error(f"Error processing streaming chunk: {e}")
+                            print(f"Error processing streaming chunk: {e}")
+                            continue
+                except asyncio.CancelledError:
+                    # logger.info("Client disconnected during streaming.")
+                    print("Client disconnected during streaming.")
+                    raise
+                except Exception as e:
+                    # logger.error(f"Unexpected error during streaming: {e}")
+                    print( f"Unexpected error during streaming: {e}")
+                    raise
+
+            return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
+
+        else:
+            data = response.json()
+            data["session_id"] = session_id
+            return JSONResponse(content=data)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
