@@ -33,7 +33,7 @@ VLLM_CHAT_SERVER = ServerConfig(**config["server"]["VLLM_CHAT_SERVER"])
 VLLM_IMAGE_SERVER = ServerConfig(**config["server"]["VLLM_IMAGE_SERVER"])
 CALLBACK_SERVER = ServerConfig(**config["server"]["CALLBACK_SERVER"])
 
-@app.post("/pets/images-recognize")
+@app.post("v1/pets/images-recognize")
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     prompts_map = {
         "emotion_analysis": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detection_results,emotion,correlation_score(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
