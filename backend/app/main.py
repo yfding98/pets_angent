@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 import requests
 
-from app.schema import ChatCompletionRequest
+from schema import ChatCompletionRequest
 
 app = FastAPI()
 
