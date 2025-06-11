@@ -1,20 +1,25 @@
 import argparse
-import asyncio
 import json
 import random
 
-import httpx
 import yaml
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 import requests
 from httpx import AsyncClient
+from starlette.middleware.cors import CORSMiddleware
 
+from ..common.custom_exception import CustomException
 from schema import ChatCompletionRequest, ChatCompletionImageRequest, ServerConfig
 
 app = FastAPI()
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 生产环境应限制具体域名
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 parser = argparse.ArgumentParser(description="启动 模型接口处理 服务")
 parser.add_argument("--port", type=int, default=8000, help="服务监听端口")
 args = parser.parse_args()
@@ -57,7 +62,12 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
         vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
     elif vllm_payload["messages"][0]["role"] == "system":
         original_content = vllm_payload["messages"][0]["content"]
-        vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
+        if isinstance(original_content, list):
+            original_content = original_content[0]["text"]
+            new_content = original_content + "\n" + system_prompt
+            vllm_payload["messages"][0]["content"] = [{"type": "text", "text": new_content}]
+        elif isinstance(original_content, str):
+            vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
 
     response = requests.post(VLLM_IMAGE_SERVER.url, json=vllm_payload, headers=headers)
 
@@ -170,6 +180,32 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
             data["session_id"] = session_id
             return JSONResponse(content=data)
 
+
+# 异常处理中间件
+@app.middleware("http")
+async def exception_handler_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except CustomException as ce:
+        print(f"Request: {request.method} {request.url} CustomException: {ce}")
+        return JSONResponse(
+            status_code=200,  # 业务异常返回200，保持接口调用语义
+            content= {
+                "code": ce.code,
+                "message": ce.message
+            }
+        )
+    except Exception as e:
+        # 处理系统异常
+        print(f"Request: {request.method} {request.url} Exception: {e}")
+        return JSONResponse(
+            status_code=500,
+            content= {
+                "code": 500,
+                "message": "系统异常"
+            }
+        )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=args.port)
