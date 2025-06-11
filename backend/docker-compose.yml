@@ -6,7 +6,7 @@ services:
     privileged: true
     ipc: host
     shm_size: "80gb"
-    working_dir: /workspace
+    working_dir: /app
     entrypoint: []
     environment:
       - MTHREADS_VISIBLE_DEVICES=all
