@@ -80,8 +80,15 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
     if "correlationScore" in result:
         for key,  value in result["correlationScore"].items():
             if 5 <= value <= 95:
-                result["correlation_score"][key] += int(random.uniform(-5, 5))
-
+                result["correlationScore"][key] += int(random.uniform(-5, 5))
+    if "detectionResults" in result:
+        detection_results = []
+        for key, value in result["detectionResults"].items():
+            detection_results.append({
+                "key": key,
+                "value": value
+            })
+        result["detectionResults"] = detection_results
 
     result_ ={
         "scene":scene,
