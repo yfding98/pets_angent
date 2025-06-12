@@ -11,7 +11,7 @@ WORKDIR /workspace
 COPY ./requirements.txt /workspace/
 COPY ./app /workspace/app
 COPY ./common  /workspace/common
-COPY ./config.yaml /app/
+COPY ./config.yaml /workspace/
 COPY ./main.py /workspace/
 # 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
