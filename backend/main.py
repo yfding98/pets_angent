@@ -10,8 +10,8 @@ import requests
 from httpx import AsyncClient
 from starlette.middleware.cors import CORSMiddleware
 
-from ..common.custom_exception import CustomException
-from schema import ChatCompletionRequest, ChatCompletionImageRequest, ServerConfig
+from common.custom_exception import CustomException
+from app.schema import ChatCompletionRequest, ChatCompletionImageRequest, ServerConfig
 
 app = FastAPI()
 app.add_middleware(

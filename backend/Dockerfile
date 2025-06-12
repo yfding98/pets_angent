@@ -7,9 +7,11 @@ RUN apt update && \
 
 RUN pip install --upgrade pip
 
-WORKDIR /app
-COPY ./requirements.txt /app/
-COPY ./app /app
+WORKDIR /workspace
+COPY ./requirements.txt /workspace/
+COPY ./app /workspace/app
+COPY ./common  /workspace/common
 COPY ./config.yaml /app/
+COPY ./main.py /workspace/
 # 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
