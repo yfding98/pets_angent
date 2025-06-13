@@ -66,16 +66,15 @@ async def send_failure_callback(scene: str, recognize_id: str, error_message: st
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     prompts_map = {
         "emotion": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults,emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
-        "breed": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
-    }
-    headers = {
-        "Content-Type": "application/json"
+        "category": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
     }
     client_data = await raw_request.json()
     # 提取 session_id 和 business_type
     session_id = client_data.get("recognizeId", "")
     scene = client_data.get("scene", "")
     try:
+        if scene not in prompts_map:
+            raise CustomException(code=403, message="Invalid scene")
         # 构造转发给 vLLM 的 payload（去掉中间层字段）
         vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
 
@@ -97,7 +96,7 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
             response = await client.post(VLLM_IMAGE_SERVER.url, json=vllm_payload)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Model service error")
+            raise CustomException(code=response.status_code, message="Model service error")
 
         result = response.json()
         result = result["choices"][0]["message"]["content"]
