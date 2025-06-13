@@ -1,20 +1,21 @@
 import argparse
 import asyncio
 import json
+import logging
 import random
+import time
 import traceback
 
 import httpx
-import yaml
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
-import requests
 from httpx import AsyncClient
 from starlette.middleware.cors import CORSMiddleware
 
+from common.config import CALLBACK_SERVER, VLLM_IMAGE_SERVER, VLLM_CHAT_SERVER
 from common.custom_exception import CustomException
-from app.schema import ChatCompletionRequest, ChatCompletionImageRequest, ServerConfig
+from app.schema import ChatCompletionRequest, ChatCompletionImageRequest
 
 app = FastAPI()
 app.add_middleware(
@@ -28,18 +29,7 @@ parser.add_argument("--port", type=int, default=8000, help="服务监听端口")
 args = parser.parse_args()
 
 
-def load_config(file_path="config.yaml"):
-    try:
-        with open(file_path, "r") as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(e)
 
-config = load_config()
-
-VLLM_CHAT_SERVER = ServerConfig(**config["server"]["VLLM_CHAT_SERVER"])
-VLLM_IMAGE_SERVER = ServerConfig(**config["server"]["VLLM_IMAGE_SERVER"])
-CALLBACK_SERVER = ServerConfig(**config["server"]["CALLBACK_SERVER"])
 
 async def send_failure_callback(scene: str, recognize_id: str, error_message: str):
     """
@@ -59,9 +49,9 @@ async def send_failure_callback(scene: str, recognize_id: str, error_message: st
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(CALLBACK_SERVER.host+CALLBACK_SERVER.url, json=fail_result)
             if response.status_code != 200:
-                print(f"Callback failed with status {response.status_code}: {response.text}")
+                logging.error(f"Callback failed with status {response.status_code}: {response.text}")
     except Exception as e:
-        print(f"Failed to send callback even after main error: {e}, traceback: {traceback.format_exc()}")
+        logging.error(f"Failed to send callback even after main error: {e}, traceback: {traceback.format_exc()}")
 
 async def process_and_callback(client_data):
     try:
@@ -71,13 +61,14 @@ async def process_and_callback(client_data):
         }
         scene = client_data.get("scene",  "")
         session_id = client_data.get("recognizeId", "")
+        pet_info = client_data.get("petArchive", "")
         if scene not in prompts_map:
             raise CustomException(code=403, message="Invalid scene")
         if not session_id:
             raise CustomException(code=403, message="Invalid recognizeId")
         # 构造 payload、system prompt 等逻辑与原函数一致
-        vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
-        vllm_payload["model"] = "Qwen2.5-VL-72B-Instruct"
+        client_data["model"] = VLLM_IMAGE_SERVER.model_name
+        vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene", "petArchive"]}
         system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，" + prompts_map[scene]
 
         if vllm_payload["messages"][0]["role"] != "system":
@@ -95,7 +86,10 @@ async def process_and_callback(client_data):
             response = await client.post(VLLM_IMAGE_SERVER.host+VLLM_IMAGE_SERVER.url, json=vllm_payload)
 
         if response.status_code != 200:
+            logging.error(f"Model service error")
             raise CustomException(code=response.status_code, message="Model service error")
+        else:
+            logging.info(f"Image2Txt model exec success!")
 
         result = response.json()
         result = result["choices"][0]["message"]["content"]
@@ -113,7 +107,6 @@ async def process_and_callback(client_data):
                 detection_results.append({"key": key, "value": value})
             result["detectionResults"] = detection_results
 
-
         result_json = json.dumps(result, ensure_ascii=False)
         callback_data = {
             "scene": scene,
@@ -125,16 +118,15 @@ async def process_and_callback(client_data):
         async with httpx.AsyncClient(timeout=10.0) as client:
             r_ = await client.post(CALLBACK_SERVER.host+CALLBACK_SERVER.url, json=callback_data)
             if r_.status_code != 200:
-                print(f"Callback failed with status {r_.status_code}: {r_.text}")
+                logging.error(f"Callback failed with status {r_.status_code}: {r_.text}")
             else:
                 if r_.json()["code"] != "200":
-                    print("Callback Server Inner Error"+r_.json()["message"])
+                    logging.warning("Callback Server Inner Error"+r_.json()["message"])
                 else:
-                    print("Callback successful")
-    except httpx.RequestError as exc:
-        error_msg = f"Network error during model request: {exc}"
-        await send_failure_callback(scene, session_id, error_msg)
-        raise HTTPException(status_code=503, detail="Upstream service unavailable")
+                    logging.info("Callback successful")
+    except CustomException as exc:
+        logging.error(f"CustomException: {exc.message}")
+        raise HTTPException(status_code=exc.code, detail=exc.message)
 
     except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
         error_msg = f"Model response format error: {exc}"
@@ -165,6 +157,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
     # 提取 session_id 和 business_type
     session_id = client_data.get("session_id", "")
     business_type = client_data.get("business_type", "")
+    client_data["model"] = VLLM_CHAT_SERVER.model_name
 
     # 构造转发给 vLLM 的 payload（去掉中间层字段）
     vllm_payload = {k: v for k, v in client_data.items() if k not in ["session_id", "business_type"]}
@@ -235,6 +228,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
             )
 
             if response.status_code != 200:
+                logging.error(f"Request: {request.method} {request.url} Exception: {response.text}")
                 raise HTTPException(status_code=response.status_code, detail=response.text)
 
             data = response.json()
@@ -259,7 +253,7 @@ async def exception_handler_middleware(request: Request, call_next):
         )
     except Exception as e:
         # 处理系统异常
-        print(f"Request: {request.method} {request.url} Exception: {e}")
+        logging.error(f"Request: {request.method} {request.url} Exception: {e}")
         return JSONResponse(
             status_code=500,
             content= {
@@ -267,6 +261,16 @@ async def exception_handler_middleware(request: Request, call_next):
                 "message": "系统异常"
             }
         )
+
+logger = logging.getLogger("http")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000  # 转为毫秒
+    logger.info(f"{request.client.host} {request.method} {request.url.path} {response.status_code} {process_time:.2f}ms")
+    return response
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=args.port)

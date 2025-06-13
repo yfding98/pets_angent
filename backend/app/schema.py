@@ -4,10 +4,6 @@ from openai.types.evals.create_eval_completions_run_data_source import SamplingP
 from pydantic import BaseModel, ConfigDict, Field
 from openai.types.chat import ChatCompletionMessageParam
 
-class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
-    url: str = ""
-    method:  str = "POST"
 
 
 class OpenAIBaseModel(BaseModel):
