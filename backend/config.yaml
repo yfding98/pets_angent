@@ -19,7 +19,7 @@ server:
         api_key: "*"
 logger:
   level: INFO
-  log_file: /var/log/petpal/app.log
+  log_file: /workspace/log/app.log
   when: midnight       # 按天分割日志
   backup_count: 7      # 保留最近 7 天的日志
   format: "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"

@@ -7,6 +7,8 @@ services:
     ipc: host
     shm_size: "80gb"
     working_dir: /workspace
+    volumes:
+      - /var/log/petpal:/workspace/log
     entrypoint: []
     environment:
       - MTHREADS_VISIBLE_DEVICES=all
