@@ -127,8 +127,8 @@ async def process_and_callback(client_data):
             if r_.status_code != 200:
                 print(f"Callback failed with status {r_.status_code}: {r_.text}")
             else:
-                if r_.json()["code"] != 200:
-                    raise CustomException(code=500, message="Callback Server Inner Error"+r_.json()["message"])
+                if r_.json()["code"] != "200":
+                    print("Callback Server Inner Error"+r_.json()["message"])
                 else:
                     print("Callback successful")
     except httpx.RequestError as exc:
