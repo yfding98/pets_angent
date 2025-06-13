@@ -2,11 +2,14 @@ server:
     port: 8000
     host: 0.0.0.0
     CALLBACK_SERVER:
-        url: "http://dev-api.foresightx.com.cn/foresightx-ai-pet"
+        host: "http://dev-api.foresightx.com.cn/foresightx-ai-pet"
+        url: "/v1/recognize/result/callback"
         method: "POST"
     VLLM_CHAT_SERVER:
-        url: "http://10.1.0.222:8080/v1/chat/completions"
+        host: "http://10.1.0.222:8080"
+        url: "/v1/chat/completions"
         method: "POST"
     VLLM_IMAGE_SERVER:
-        url: "http://10.1.0.216:8020/v1/chat/completions"
+        host: "http://10.1.0.216:8020"
+        url: "/v1/chat/completions"
         method: "POST"

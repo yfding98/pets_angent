@@ -5,8 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from openai.types.chat import ChatCompletionMessageParam
 
 class ServerConfig(BaseModel):
-    method:  str = "llama"
+    host: str = "0.0.0.0"
     url: str = ""
+    method:  str = "POST"
 
 
 class OpenAIBaseModel(BaseModel):

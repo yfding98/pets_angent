@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import json
 import random
 import traceback
@@ -56,32 +57,30 @@ async def send_failure_callback(scene: str, recognize_id: str, error_message: st
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(CALLBACK_SERVER.url, json=fail_result)
+            response = await client.post(CALLBACK_SERVER.host+CALLBACK_SERVER.url, json=fail_result)
             if response.status_code != 200:
                 print(f"Callback failed with status {response.status_code}: {response.text}")
     except Exception as e:
         print(f"Failed to send callback even after main error: {e}, traceback: {traceback.format_exc()}")
 
-@app.post("/v1/pets/images-recognize")
-async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
-    prompts_map = {
-        "emotion": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults,emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
-        "category": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
-    }
-    client_data = await raw_request.json()
-    # 提取 session_id 和 business_type
-    session_id = client_data.get("recognizeId", "")
-    scene = client_data.get("scene", "")
+async def process_and_callback(client_data):
     try:
+        prompts_map = {
+            "emotion": "你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults(内部主键是识别项的名称，无须转换英文),emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
+            "category": "你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！"
+        }
+        scene = client_data.get("scene",  "")
+        session_id = client_data.get("recognizeId", "")
         if scene not in prompts_map:
             raise CustomException(code=403, message="Invalid scene")
-        # 构造转发给 vLLM 的 payload（去掉中间层字段）
+        if not session_id:
+            raise CustomException(code=403, message="Invalid recognizeId")
+        # 构造 payload、system prompt 等逻辑与原函数一致
         vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
-
-        system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ prompts_map[scene]
+        vllm_payload["model"] = "Qwen2.5-VL-72B-Instruct"
+        system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，" + prompts_map[scene]
 
         if vllm_payload["messages"][0]["role"] != "system":
-            # 往messages列表的首位插入系统角色消息
             vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
         elif vllm_payload["messages"][0]["role"] == "system":
             original_content = vllm_payload["messages"][0]["content"]
@@ -93,7 +92,7 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
                 vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(VLLM_IMAGE_SERVER.url, json=vllm_payload)
+            response = await client.post(VLLM_IMAGE_SERVER.host+VLLM_IMAGE_SERVER.url, json=vllm_payload)
 
         if response.status_code != 200:
             raise CustomException(code=response.status_code, message="Model service error")
@@ -105,29 +104,33 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
 
         # 给 correlation_score 分数添加噪声
         if "correlationScore" in result:
-            for key,  value in result["correlationScore"].items():
+            for key, value in result["correlationScore"].items():
                 if 5 <= value <= 95:
                     result["correlationScore"][key] += int(random.uniform(-5, 5))
         if "detectionResults" in result:
             detection_results = []
             for key, value in result["detectionResults"].items():
-                detection_results.append({
-                    "key": key,
-                    "value": value
-                })
+                detection_results.append({"key": key, "value": value})
             result["detectionResults"] = detection_results
 
-        callback_data ={
-            "scene":scene,
-            "recognizeId":session_id,
-            "result":result,
-            "status":"success",
+
+        result_json = json.dumps(result, ensure_ascii=False)
+        callback_data = {
+            "scene": scene,
+            "recognizeId": session_id,
+            "result": result_json,
+            "status": "success",
         }
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(CALLBACK_SERVER.url, json=callback_data)
-
-        return JSONResponse(content={}, status_code=200)
+            r_ = await client.post(CALLBACK_SERVER.host+CALLBACK_SERVER.url, json=callback_data)
+            if r_.status_code != 200:
+                print(f"Callback failed with status {r_.status_code}: {r_.text}")
+            else:
+                if r_.json()["code"] != 200:
+                    raise CustomException(code=500, message="Callback Server Inner Error"+r_.json()["message"])
+                else:
+                    print("Callback successful")
     except httpx.RequestError as exc:
         error_msg = f"Network error during model request: {exc}"
         await send_failure_callback(scene, session_id, error_msg)
@@ -140,8 +143,16 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
 
     except Exception as exc:
         error_msg = traceback.format_exc()
+        session_id = client_data.get("recognizeId", "")
+        scene  = client_data.get("scene",  "")
         await send_failure_callback(scene, session_id, error_msg)
         raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
+@app.post("/v1/pets/images-recognize")
+async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
+    client_data = await raw_request.json()
+    asyncio.create_task(process_and_callback(client_data))
+
+    return JSONResponse(content={"status": "received"}, status_code=200)
 
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
@@ -184,7 +195,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
             async with AsyncClient() as client:
                 async with client.stream(
                         method=VLLM_CHAT_SERVER.method,
-                        url=VLLM_CHAT_SERVER.url,
+                        url=VLLM_CHAT_SERVER.host+VLLM_CHAT_SERVER.url,
                         json=vllm_payload,
                         headers={"Content-Type": "application/json"},
                         timeout=600
@@ -217,7 +228,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
     else:
         async with AsyncClient() as client:
             response = await client.post(
-                VLLM_CHAT_SERVER.url,
+                VLLM_CHAT_SERVER.host+VLLM_CHAT_SERVER.url,
                 json=vllm_payload,
                 headers={"Content-Type": "application/json"},
                 timeout=600
