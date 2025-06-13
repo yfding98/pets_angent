@@ -1,7 +1,9 @@
 import argparse
 import json
 import random
+import traceback
 
+import httpx
 import yaml
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse,StreamingResponse
@@ -38,6 +40,28 @@ VLLM_CHAT_SERVER = ServerConfig(**config["server"]["VLLM_CHAT_SERVER"])
 VLLM_IMAGE_SERVER = ServerConfig(**config["server"]["VLLM_IMAGE_SERVER"])
 CALLBACK_SERVER = ServerConfig(**config["server"]["CALLBACK_SERVER"])
 
+async def send_failure_callback(scene: str, recognize_id: str, error_message: str):
+    """
+    统一发送失败回调
+    :param scene: 请求场景
+    :param recognize_id: 唯一标识
+    :param error_message: 错误信息
+    """
+    fail_result = {
+        "scene": scene,
+        "recognizeId": recognize_id,
+        "status": "fail",
+        "failMessage": f"服务异常,错误信息：{error_message}"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(CALLBACK_SERVER.url, json=fail_result)
+            if response.status_code != 200:
+                print(f"Callback failed with status {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"Failed to send callback even after main error: {e}, traceback: {traceback.format_exc()}")
+
 @app.post("/v1/pets/images-recognize")
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     prompts_map = {
@@ -51,54 +75,74 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
     # 提取 session_id 和 business_type
     session_id = client_data.get("recognizeId", "")
     scene = client_data.get("scene", "")
+    try:
+        # 构造转发给 vLLM 的 payload（去掉中间层字段）
+        vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
 
-    # 构造转发给 vLLM 的 payload（去掉中间层字段）
-    vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene"]}
+        system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ prompts_map[scene]
 
-    system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ prompts_map[scene]
+        if vllm_payload["messages"][0]["role"] != "system":
+            # 往messages列表的首位插入系统角色消息
+            vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
+        elif vllm_payload["messages"][0]["role"] == "system":
+            original_content = vllm_payload["messages"][0]["content"]
+            if isinstance(original_content, list):
+                original_content = original_content[0]["text"]
+                new_content = original_content + "\n" + system_prompt
+                vllm_payload["messages"][0]["content"] = [{"type": "text", "text": new_content}]
+            elif isinstance(original_content, str):
+                vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
 
-    if vllm_payload["messages"][0]["role"] != "system":
-        # 往messages列表的首位插入系统角色消息
-        vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
-    elif vllm_payload["messages"][0]["role"] == "system":
-        original_content = vllm_payload["messages"][0]["content"]
-        if isinstance(original_content, list):
-            original_content = original_content[0]["text"]
-            new_content = original_content + "\n" + system_prompt
-            vllm_payload["messages"][0]["content"] = [{"type": "text", "text": new_content}]
-        elif isinstance(original_content, str):
-            vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(VLLM_IMAGE_SERVER.url, json=vllm_payload)
 
-    response = requests.post(VLLM_IMAGE_SERVER.url, json=vllm_payload, headers=headers)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Model service error")
 
-    result = response.json()
-    result = result["choices"][0]["message"]["content"]
-    json_str = result.strip("```json").strip("```").strip()
-    result = json.loads(json_str)
+        result = response.json()
+        result = result["choices"][0]["message"]["content"]
+        json_str = result.strip("```json").strip("```").strip()
+        result = json.loads(json_str)
 
-    # 给 correlation_score 分数添加噪声
-    if "correlationScore" in result:
-        for key,  value in result["correlationScore"].items():
-            if 5 <= value <= 95:
-                result["correlationScore"][key] += int(random.uniform(-5, 5))
-    if "detectionResults" in result:
-        detection_results = []
-        for key, value in result["detectionResults"].items():
-            detection_results.append({
-                "key": key,
-                "value": value
-            })
-        result["detectionResults"] = detection_results
+        # 给 correlation_score 分数添加噪声
+        if "correlationScore" in result:
+            for key,  value in result["correlationScore"].items():
+                if 5 <= value <= 95:
+                    result["correlationScore"][key] += int(random.uniform(-5, 5))
+        if "detectionResults" in result:
+            detection_results = []
+            for key, value in result["detectionResults"].items():
+                detection_results.append({
+                    "key": key,
+                    "value": value
+                })
+            result["detectionResults"] = detection_results
 
-    result_ ={
-        "scene":scene,
-        "recognizeId":session_id,
-        "result":result
-    }
+        callback_data ={
+            "scene":scene,
+            "recognizeId":session_id,
+            "result":result,
+            "status":"success",
+        }
 
-    # 回调接口
-    requests.post(CALLBACK_SERVER.url, json=result_)
-    return JSONResponse(content={}, status_code=200)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(CALLBACK_SERVER.url, json=callback_data)
+
+        return JSONResponse(content={}, status_code=200)
+    except httpx.RequestError as exc:
+        error_msg = f"Network error during model request: {exc}"
+        await send_failure_callback(scene, session_id, error_msg)
+        raise HTTPException(status_code=503, detail="Upstream service unavailable")
+
+    except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        error_msg = f"Model response format error: {exc}"
+        await send_failure_callback(scene, session_id, error_msg)
+        raise HTTPException(status_code=500, detail="Failed to parse model response")
+
+    except Exception as exc:
+        error_msg = traceback.format_exc()
+        await send_failure_callback(scene, session_id, error_msg)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
 
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
