@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM registry.mthreads.com/mcconline/musa-pytorch-release-public:rc3.1.0-v1.3.0-S4000-py310
 
 ENV PATH="/opt/conda/envs/py38/bin:$PATH"
 
