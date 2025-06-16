@@ -2,17 +2,22 @@ import argparse
 import asyncio
 import json
 import logging
+import os.path
 import random
 import time
 import traceback
+from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 from httpx import AsyncClient
 from starlette.middleware.cors import CORSMiddleware
 
+from algorithm import classifier
+from algorithm.classifier import AnimalClassifier
+from backend.common.config import BASE_DIR
 from common.config import CALLBACK_SERVER, VLLM_IMAGE_SERVER, VLLM_CHAT_SERVER
 from common.custom_exception import CustomException
 from app.schema import ChatCompletionRequest, ChatCompletionImageRequest
@@ -27,7 +32,12 @@ app.add_middleware(
 parser = argparse.ArgumentParser(description="启动 模型接口处理 服务")
 parser.add_argument("--port", type=int, default=8000, help="服务监听端口")
 args = parser.parse_args()
-
+# 创建分类器单例
+try:
+    classifier = AnimalClassifier(model_path=os.path.join(BASE_DIR, 'models', 'mobilenetv3_scripted.pt'),
+                                  class_index_path=os.path.join(BASE_DIR, 'models','imagenet_class_index.json'))
+except Exception as e:
+    raise RuntimeError(f"初始化分类器失败: {e}")
 
 
 
@@ -81,7 +91,7 @@ async def process_and_callback(client_data):
                 vllm_payload["messages"][0]["content"] = [{"type": "text", "text": new_content}]
             elif isinstance(original_content, str):
                 vllm_payload["messages"][0]["content"] = original_content + "\n" + system_prompt
-
+        start_time = time.time()
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(VLLM_IMAGE_SERVER.host+VLLM_IMAGE_SERVER.url, json=vllm_payload)
 
@@ -89,7 +99,7 @@ async def process_and_callback(client_data):
             logging.error(f"Model service error")
             raise CustomException(code=response.status_code, message="Model service error")
         else:
-            logging.info(f"Image2Txt model exec success!")
+            logging.info(f"Image2Txt model exec success! cost time: {time.time() - start_time} s")
 
         result = response.json()
         result = result["choices"][0]["message"]["content"]
@@ -234,6 +244,47 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
             data = response.json()
             data["session_id"] = session_id
             return JSONResponse(content=data)
+
+
+@app.post("/v1/pets/flash-recognize", summary="上传图片文件或指定图片URL进行分类")
+async def classify(
+        image_url: Optional[str] = Query(None, description="图片的URL地址"),
+):
+    """
+    返回
+    is_animal:是否可能是宠物
+    predictions: 检测结果列表，前五种可能性
+        "label": 具体的品种名,
+        "probability": 概率,
+        "isAnimal": False,
+        "animal_category": 动物品种大类
+    """
+    # 校验是否提供了有效的输入
+    if not image_url:
+        raise CustomException(code=400,message="必须提供图片URL。")
+    try:
+        # 来自远程URL
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url, timeout=10)
+            if response.status_code != 200:
+                raise CustomException(code=400,message="无法访问图片URL: {image_url}")
+
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise CustomException(code=400,message=f"远程内容不是图片: {content_type}")
+
+            image_bytes = response.content
+
+        # 调用分类器
+        results = classifier.predict(image_bytes)
+
+        if "error" in results:
+            raise HTTPException(status_code=422, detail=results["error"])
+
+        return results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"处理图片时发生未知错误: {str(e)}")
 
 
 # 异常处理中间件

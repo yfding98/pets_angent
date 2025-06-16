@@ -1,0 +1,39 @@
+# Git 相关
+.git
+.gitignore
+
+# Python 编译缓存
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# 日志与临时文件
+*.log
+*.tmp
+*.bak
+
+# IDE 配置文件
+.vscode
+.idea
+.env
+*.suo
+*.db
+*.sqlite
+
+# 虚拟环境
+venv
+env
+__pypackages__
+
+# 测试和文档
+test
+tests
+docs
+README.md
+LICENSE
+.dockerignore
+
+# 其他系统文件
+.DS_Store
+Thumbs.db

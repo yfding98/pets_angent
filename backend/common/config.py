@@ -6,6 +6,7 @@ import os
 import yaml
 from pydantic import BaseModel
 
+BASE_DIR  = Path(__file__).resolve().parent.parent
 
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
@@ -62,10 +63,12 @@ def load_config(file_path="config.yaml"):
         print(e)
 
 
+config_path = os.path.join(BASE_DIR, "config.yaml")
 
-configs = load_config()
-setup_logger()
+configs = load_config(config_path)
+setup_logger(config_path)
 
 VLLM_CHAT_SERVER = ServerConfig(**configs["server"]["VLLM_CHAT_SERVER"])
 VLLM_IMAGE_SERVER = ServerConfig(**configs["server"]["VLLM_IMAGE_SERVER"])
 CALLBACK_SERVER = ServerConfig(**configs["server"]["CALLBACK_SERVER"])
+

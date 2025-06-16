@@ -21,8 +21,19 @@ class ChatCompletionRequest(OpenAIBaseModel):
     model:  str
     messages: List[ChatCompletionMessageParam]
 
+class PetArchive(BaseModel):
+    sex: Optional[str] = None
+    birthday: Optional[str] = None
+    parentCategory: Optional[str] = None
+    category: Optional[str] = None
+    weight: Optional[str] = None
+    sterilization: Optional[str] = None
+    age: Optional[str] = None
+    bcs: Optional[str] = None
+
 class ChatCompletionImageRequest(OpenAIBaseModel):
     recognizeId:  Optional[str] = None
     scene: Optional[str] = None
     model:  str
     messages: List[ChatCompletionMessageParam]
+    petArchive: Optional[PetArchive] = None
