@@ -5,3 +5,5 @@ httpx==0.28.1
 PyYAML==6.0.2
 requests==2.32.3
 starlette==0.46.2
+timm==1.0.15
+Pillow>=9.0.0
