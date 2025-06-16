@@ -1,7 +1,6 @@
 # prepare_model.py
 import torch
 import timm
-import json
 import os
 from urllib.request import urlopen
 

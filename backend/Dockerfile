@@ -1,6 +1,6 @@
 FROM registry.mthreads.com/mcconline/musa-pytorch-release-public:rc3.1.0-v1.3.0-S4000-py310
 
-ENV PATH="/opt/conda/envs/py38/bin:$PATH"
+ENV PATH="/opt/conda/envs/py310/bin:$PATH"
 
 RUN apt update && \
     apt clean

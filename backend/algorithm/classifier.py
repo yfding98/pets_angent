@@ -2,14 +2,14 @@
 import logging
 import time
 
+import timm
 import torch
 import torch_musa
 import json
 from PIL import Image
 from torchvision import transforms
 import io
-
-
+MODEL_NAME = 'mobilenetv3_small_100.lamb_in1k'
 class AnimalClassifier:
     def __init__(self, model_path, class_index_path):
         """
@@ -21,7 +21,8 @@ class AnimalClassifier:
         print("正在初始化分类器...")
         # 1. 加载优化的TorchScript模型
         self.device = torch.device("musa")
-        self.model = torch.jit.load(model_path, map_location=self.device)
+        # self.model = torch.jit.load(model_path, map_location=self.device)
+        self.model = timm.create_model(MODEL_NAME, pretrained=True)
         self.model.eval()  # 确保是评估模式
         print(f"模型已加载到设备: {self.device}")
 
