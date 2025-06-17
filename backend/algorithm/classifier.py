@@ -1,6 +1,7 @@
 # classifier.py
 import logging
 import os
+import sys
 import time
 
 import timm
@@ -11,7 +12,8 @@ from PIL import Image
 from torchvision import transforms
 import io
 
-from ..common.config import BASE_DIR
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from common.config import BASE_DIR
 
 MODEL_NAME = 'mobilenetv3_small_100.lamb_in1k'
 LOCAL_WEIGHT_PATH = os.path.join(BASE_DIR, "models", "mobilenetv3_classification_image-1k.pth")
