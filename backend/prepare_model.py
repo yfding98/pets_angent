@@ -2,6 +2,7 @@
 import logging
 
 import torch
+import torch_musa
 import timm
 import os
 from urllib.request import urlopen

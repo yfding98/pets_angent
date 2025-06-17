@@ -12,4 +12,4 @@ COPY . /workspace
 # 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN python prepare_model.py
+CMD ["python", "prepare_model.py"]

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+from urllib.request import urlopen
 
 import timm
 import torch
@@ -34,6 +35,17 @@ class AnimalClassifier:
         self.model = timm.create_model(MODEL_NAME, pretrained=False)
         # 3. 加载本地权重
         state_dict = torch.load(LOCAL_WEIGHT_PATH, map_location=self.device)
+
+        if os.path.exists(class_index_path):
+            logging.info("正在下载ImageNet类别索引...")
+            url = 'https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json'
+            with urlopen(url) as response:
+                class_idx_data = response.read()
+            with open(class_index_path, 'wb') as f:
+                f.write(class_idx_data)
+            logging.info(f"类别索引已保存到: {class_idx_data}")
+        else:
+            print("本地权重文件不存在，使用预训练权重")
 
         # 4. 加载权重到模型中（严格匹配或非严格匹配）
         try:
