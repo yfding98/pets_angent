@@ -36,7 +36,7 @@ class AnimalClassifier:
         # 3. 加载本地权重
         state_dict = torch.load(LOCAL_WEIGHT_PATH, map_location=self.device)
 
-        if os.path.exists(class_index_path):
+        if not os.path.exists(class_index_path):
             logging.info("正在下载ImageNet类别索引...")
             url = 'https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json'
             with urlopen(url) as response:
@@ -44,16 +44,13 @@ class AnimalClassifier:
             with open(class_index_path, 'wb') as f:
                 f.write(class_idx_data)
             logging.info(f"类别索引已保存到: {class_idx_data}")
-        else:
-            print("本地权重文件不存在，使用预训练权重")
-
         # 4. 加载权重到模型中（严格匹配或非严格匹配）
         try:
             self.model.load_state_dict(state_dict, strict=True)
         except Exception as e:
             print("Warning: Some weights not matched exactly. Trying non-strict loading...")
             self.model.load_state_dict(state_dict, strict=False)
-
+        self.model = self.model.to(self.device)
         self.model.eval()  # 确保是评估模式
         print(f"模型已加载到设备: {self.device}")
 
