@@ -1,4 +1,6 @@
 # prepare_model.py
+import logging
+
 import torch
 import timm
 import os
@@ -9,6 +11,7 @@ from common.config import BASE_DIR
 # --- 配置 ---
 MODEL_NAME = 'mobilenetv3_small_100.lamb_in1k'
 MODEL_DIR = 'models'
+BASE_MODEL_PATH = os.path.join(BASE_DIR,MODEL_DIR, 'mobilenetv3_classification_image-1k.pth')
 SCRIPTED_MODEL_PATH = os.path.join(BASE_DIR,MODEL_DIR, 'mobilenetv3_scripted.pt')
 CLASS_INDEX_PATH = os.path.join(BASE_DIR,MODEL_DIR, 'imagenet_class_index.json')
 
@@ -20,13 +23,14 @@ def prepare_environment():
     print("开始准备模型和环境...")
 
     # 2. 加载timm模型
-    print(f"从timm加载预训练模型: {MODEL_NAME}...")
+    logging.info(f"从timm加载预训练模型: {MODEL_NAME}...")
     model = timm.create_model(MODEL_NAME, pretrained=True)
+    torch.save(model.state_dict(), os.path.join(BASE_DIR,MODEL_DIR,'mobilenetv3_classification_image-1k.pth'))
     model.eval()  # 设置为评估模式
 
     # 3. 获取并打印数据预处理配置 (这些值将在服务器代码中硬编码)
     data_config = timm.data.resolve_model_data_config(model)
-    print("\n--- 模型数据配置 (请将这些值用于推理服务) ---")
+    logging.info("\n--- 模型数据配置 (请将这些值用于推理服务) ---")
     print(f"Input size: {data_config['input_size']}")
     print(f"Interpolation: {data_config['interpolation']}")
     print(f"Mean: {data_config['mean']}")
@@ -40,24 +44,24 @@ def prepare_environment():
     os.makedirs(os.path.dirname(SCRIPTED_MODEL_PATH), exist_ok=True)
 
     # 5. 使用TorchScript JIT追踪模型
-    print("正在将模型转换为TorchScript...")
+    logging.info("正在将模型转换为TorchScript...")
     try:
         scripted_model = torch.jit.trace(model, example_input)
         scripted_model.save(SCRIPTED_MODEL_PATH)
-        print(f"TorchScript模型已成功保存到: {SCRIPTED_MODEL_PATH}")
+        logging.info(f"TorchScript模型已成功保存到: {SCRIPTED_MODEL_PATH}")
     except Exception as e:
-        print(f"模型导出失败: {e}")
+        logging.error(f"模型导出失败: {e}")
         return
 
     # 6. 下载并保存ImageNet类别索引文件
     if not os.path.exists(CLASS_INDEX_PATH):
-        print("正在下载ImageNet类别索引...")
+        logging.info("正在下载ImageNet类别索引...")
         url = 'https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json'
         with urlopen(url) as response:
             class_idx_data = response.read()
         with open(CLASS_INDEX_PATH, 'wb') as f:
             f.write(class_idx_data)
-        print(f"类别索引已保存到: {CLASS_INDEX_PATH}")
+        logging.info(f"类别索引已保存到: {CLASS_INDEX_PATH}")
     else:
         print("类别索引文件已存在。")
 

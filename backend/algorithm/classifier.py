@@ -1,5 +1,6 @@
 # classifier.py
 import logging
+import os
 import time
 
 import timm
@@ -9,7 +10,11 @@ import json
 from PIL import Image
 from torchvision import transforms
 import io
+
+from ..common.config import BASE_DIR
+
 MODEL_NAME = 'mobilenetv3_small_100.lamb_in1k'
+LOCAL_WEIGHT_PATH = os.path.join(BASE_DIR, "models", "mobilenetv3_classification_image-1k.pth")
 class AnimalClassifier:
     def __init__(self, model_path, class_index_path):
         """
@@ -22,7 +27,19 @@ class AnimalClassifier:
         # 1. 加载优化的TorchScript模型
         self.device = torch.device("musa")
         # self.model = torch.jit.load(model_path, map_location=self.device)
-        self.model = timm.create_model(MODEL_NAME, pretrained=True)
+        # self.model = timm.create_model(MODEL_NAME, pretrained=True)
+
+        self.model = timm.create_model(MODEL_NAME, pretrained=False)
+        # 3. 加载本地权重
+        state_dict = torch.load(LOCAL_WEIGHT_PATH, map_location=self.device)
+
+        # 4. 加载权重到模型中（严格匹配或非严格匹配）
+        try:
+            self.model.load_state_dict(state_dict, strict=True)
+        except Exception as e:
+            print("Warning: Some weights not matched exactly. Trying non-strict loading...")
+            self.model.load_state_dict(state_dict, strict=False)
+
         self.model.eval()  # 确保是评估模式
         print(f"模型已加载到设备: {self.device}")
 

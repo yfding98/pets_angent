@@ -17,7 +17,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from algorithm import classifier
 from algorithm.classifier import AnimalClassifier
-from backend.common.config import BASE_DIR
+from common.config import BASE_DIR
 from common.config import CALLBACK_SERVER, VLLM_IMAGE_SERVER, VLLM_CHAT_SERVER
 from common.custom_exception import CustomException
 from app.schema import ChatCompletionRequest, ChatCompletionImageRequest
