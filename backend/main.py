@@ -10,9 +10,12 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 from httpx import AsyncClient
+from starlette.authentication import AuthCredentials, UnauthenticatedUser
+from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from algorithm import classifier
@@ -167,10 +170,11 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
     # 提取 session_id 和 business_type
     session_id = client_data.get("session_id", "")
     business_type = client_data.get("business_type", "")
+    pet_info = client_data.get("petArchive", "")
     client_data["model"] = VLLM_CHAT_SERVER.model_name
 
     # 构造转发给 vLLM 的 payload（去掉中间层字段）
-    vllm_payload = {k: v for k, v in client_data.items() if k not in ["session_id", "business_type"]}
+    vllm_payload = {k: v for k, v in client_data.items() if k not in ["session_id", "business_type", "petArchive"]}
     base_info ="你是petpal,来自杭州知几科技"
     # 添加业务类型提示词逻辑（可选）
     prompt_map = {
@@ -252,12 +256,12 @@ async def classify(
 ):
     """
     返回
-    is_animal:是否可能是宠物
+    isAnimal:是否可能是宠物
     predictions: 检测结果列表，前五种可能性
         "label": 具体的品种名,
         "probability": 概率,
         "isAnimal": False,
-        "animal_category": 动物品种大类
+        "animalCategory": 动物品种大类
     """
     # 校验是否提供了有效的输入
     if not image_url:
@@ -286,6 +290,12 @@ async def classify(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"处理图片时发生未知错误: {str(e)}")
 
+class DummyAuthBackend:
+    async def authenticate(self, request: Request):
+        return AuthCredentials([]), UnauthenticatedUser()
+
+
+app.add_middleware(AuthenticationMiddleware, backend=DummyAuthBackend())
 
 # 异常处理中间件
 @app.middleware("http")
@@ -322,6 +332,17 @@ async def log_requests(request: Request, call_next):
     process_time = (time.time() - start_time) * 1000  # 转为毫秒
     logger.info(f"{request.client.host} {request.method} {request.url.path} {response.status_code} {process_time:.2f}ms")
     return response
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logging.error(f"Validation Error: {exc} in request {request.url}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": 422,
+            "message": "请求数据格式错误",
+            "errors": exc.errors()  # 可选：显示详细错误信息
+        }
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=args.port)
