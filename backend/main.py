@@ -9,7 +9,7 @@ import traceback
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
@@ -152,14 +152,14 @@ async def process_and_callback(client_data):
         scene  = client_data.get("scene",  "")
         await send_failure_callback(scene, session_id, error_msg)
         raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
-@app.post("/v1/pets/images-recognize")
+@app.post("/v1/pets/images-recognize",summary="图片识别接口")
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
     client_data = await raw_request.json()
     asyncio.create_task(process_and_callback(client_data))
 
     return JSONResponse(content={"status": "received"}, status_code=200)
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", summary="大模型聊天接口")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
     """
     中间服务接口，代理到 vLLM 的 /v1/chat/completions。
@@ -250,9 +250,9 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
             return JSONResponse(content=data)
 
 
-@app.post("/v1/pets/flash-recognize", summary="上传图片文件或指定图片URL进行分类")
+@app.post("/v1/pets/flash-recognize", summary="快速识别图片是否有宠物")
 async def classify(
-        image_url: Optional[str] = Query(None, description="图片的URL地址"),
+        image_url: Optional[str] = Body(None,embed=True, description="图片的URL地址"),
 ):
     """
     返回
