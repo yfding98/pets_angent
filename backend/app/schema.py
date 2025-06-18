@@ -28,11 +28,13 @@ class ChatCompletionRequest(OpenAIBaseModel):
     session_id:  Optional[str] = None
     business_type: Optional[str] = None
     stream: Optional[bool] = False
+    model:  Optional[str]=""
     messages: List[ChatCompletionMessageParam]
     petArchive: Optional[PetArchive] = None
 
 class ChatCompletionImageRequest(OpenAIBaseModel):
     recognizeId:  Optional[str] = None
     scene: Optional[str] = None
+    model:  Optional[str] = ""
     messages: List[ChatCompletionMessageParam]
     petArchive: Optional[PetArchive] = None
