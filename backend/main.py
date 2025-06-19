@@ -193,6 +193,9 @@ async def images_recognize(request:ChatCompletionImageRequest,raw_request: Reque
     except CustomException as exc:
         logging.error(f"Exception: {exc.message}")
         raise HTTPException(status_code=exc.code, detail=exc.message)
+    except Exception as exc:
+        logging.error(f"Exception: {exc}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/v1/chat/completions", summary="大模型聊天接口")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
