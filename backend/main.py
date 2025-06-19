@@ -194,10 +194,11 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
         original_content = vllm_payload["messages"][0]["content"]
         vllm_payload["messages"][0]["content"] = original_content + "\n" + prompt_map.get(business_type, default_prompt)
 
-
+    logging.info(f"[RequestID: {session_id}] messages: {vllm_payload["messages"]}")
     is_streaming = vllm_payload.get("stream", False)
 
     if is_streaming:
+        full_response = []
         async def upstream_stream():
             async with AsyncClient() as client:
                 async with client.stream(
@@ -220,11 +221,14 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
                                 data_str = line[5:].strip()
                                 data = json.loads(data_str)
                                 data["session_id"] = session_id
+                                full_response.append(data["choices"][0]["delta"])
                                 yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
                             except json.JSONDecodeError:
                                 yield f"{line}\n\n"
                         else:
                             yield f"{line}\n\n"
+                    logging.info(f"[RequestID: {session_id}] Full Response: {full_response}")
+
 
         return StreamingResponse(
             upstream_stream(),
