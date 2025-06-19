@@ -136,7 +136,7 @@ async def process_and_callback(client_data):
                 if r_.json()["code"] != "200":
                     logging.warning("Callback Server Inner Error"+r_.json()["message"])
                 else:
-                    logging.info("Callback successful")
+                    logging.info(f"Callback successful: record_id = {session_id}")
     except CustomException as exc:
         logging.error(f"CustomException: {exc.message}")
         raise HTTPException(status_code=exc.code, detail=exc.message)
