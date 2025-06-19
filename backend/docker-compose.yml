@@ -2,7 +2,7 @@ services:
   agent-service:
     container_name: agent-service
     build: .
-    image: ding/pets/agent-service-py11:v1.0.0
+    image: ding/pets/agent-service-py11:v1.0.1
     privileged: true
     ipc: host
     shm_size: "80gb"
