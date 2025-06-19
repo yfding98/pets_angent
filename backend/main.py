@@ -194,7 +194,7 @@ async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Requ
         original_content = vllm_payload["messages"][0]["content"]
         vllm_payload["messages"][0]["content"] = original_content + "\n" + prompt_map.get(business_type, default_prompt)
 
-    logging.info(f"[RequestID: {session_id}] messages: {vllm_payload["messages"]}")
+    logging.info(f"[RequestID: {session_id}] messages: {vllm_payload['messages']}")
     is_streaming = vllm_payload.get("stream", False)
 
     if is_streaming:
