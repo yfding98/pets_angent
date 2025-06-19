@@ -66,7 +66,7 @@ async def send_failure_callback(scene: str, recognize_id: str, error_message: st
     except Exception as e:
         logging.error(f"Failed to send callback even after main error: {e}, traceback: {traceback.format_exc()}")
 
-async def process_and_callback(client_data):
+async def process_and_callback(client_data,prompt):
     try:
         prompts_map = {
             "emotion": f"你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults(内部主键是识别项的名称，无须转换英文),emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
@@ -82,35 +82,7 @@ async def process_and_callback(client_data):
         # 构造 payload、system prompt 等逻辑与原函数一致
         client_data["model"] = VLLM_IMAGE_SERVER.model_name
         vllm_payload = {k: v for k, v in client_data.items() if k not in ["recognizeId", "scene", "petArchive"]}
-        system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，" + prompts_map[scene]
-
-        # 先使用小模型对宠物图片进行分类
-        image_url = vllm_payload["messages"][0]["content"][0]["image_url"]["url"]
-        async with httpx.AsyncClient() as client:
-            response = await client.get(image_url, timeout=10)
-            if response.status_code != 200:
-                raise CustomException(code=400, message="无法访问图片URL: {image_url}")
-
-            content_type = response.headers.get('content-type', '')
-            if not content_type.startswith('image/'):
-                raise CustomException(code=400, message=f"远程内容不是图片: {content_type}")
-
-            image_bytes = response.content
-
-
-        # 调用分类器
-        results = classifier.predict(image_bytes)
-        if "error" in results:
-            raise CustomException(code=400, message=results["error"])
-        elif results["isAnimal"]:
-            # 遍历 results 的 predictions中 isAnimal 为 True 所有元素
-            able_predictions = [prediction for prediction in results["predictions"] if prediction["isAnimal"]]
-            category = able_predictions[0]["label"]
-            # 生成品种的 提示词，是 able_predictions 的前三个的 品种和概率
-            category_prompt = f"已知图片对应宠物的品种英文是({category})，"
-            system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，"+ category_prompt + prompts_map[scene]
-        else:
-            raise CustomException(code=400, message="无法识别图片中的宠物")
+        system_prompt =  prompt + prompts_map[scene]
 
         if vllm_payload["messages"][0]["role"] != "system":
             vllm_payload["messages"].insert(0, {"role": "system", "content": [{"type": "text", "text": system_prompt}]})
@@ -189,10 +161,38 @@ async def process_and_callback(client_data):
         raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
 @app.post("/v1/pets/images-recognize",summary="图片识别接口")
 async def images_recognize(request:ChatCompletionImageRequest,raw_request: Request):
-    client_data = await raw_request.json()
-    asyncio.create_task(process_and_callback(client_data))
+    try:
+        client_data = await raw_request.json()
+        # 先使用小模型对宠物图片进行分类
+        image_url = client_data["messages"][0]["content"][0]["image_url"]["url"]
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url, timeout=10)
+            if response.status_code != 200:
+                raise CustomException(code=400, message="无法访问图片URL: {image_url}")
 
-    return JSONResponse(content={"status": "received"}, status_code=200)
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise CustomException(code=400, message=f"远程内容不是图片: {content_type}")
+
+            image_bytes = response.content
+
+        # 调用分类器
+        results = classifier.predict(image_bytes)
+        if "error" in results:
+            raise CustomException(code=400, message=results["error"])
+        elif results["isAnimal"]:
+            # 遍历 results 的 predictions中 isAnimal 为 True 所有元素
+            able_predictions = [prediction for prediction in results["predictions"] if prediction["isAnimal"]]
+            category = able_predictions[0]["label"]
+            # 生成品种的 提示词，是 able_predictions 的前三个的 品种和概率
+            category_prompt = f"已知图片对应宠物的品种英文是({category})，"
+            system_prompt = "你是petpal，来自杭州知几智能，是专业的ai宠物助手，" + category_prompt
+            asyncio.create_task(process_and_callback(client_data,system_prompt))
+
+        return results
+    except CustomException as exc:
+        logging.error(f"Exception: {exc.message}")
+        raise HTTPException(status_code=exc.code, detail=exc.message)
 
 @app.post("/v1/chat/completions", summary="大模型聊天接口")
 async def proxy_chat_completions(request:ChatCompletionRequest,raw_request: Request):
