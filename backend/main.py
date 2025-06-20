@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse,StreamingResponse
 import uvicorn
 from httpx import AsyncClient
+from jsonschema.exceptions import best_match
 from starlette.authentication import AuthCredentials, UnauthenticatedUser
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.middleware.cors import CORSMiddleware
@@ -70,7 +71,7 @@ async def process_and_callback(client_data,prompt):
     try:
         prompts_map = {
             "emotion": f"你擅长分析宠物的情绪，根据识别项：[位置和角度,对称性,瞳孔大小,眼睑状态,眼神,嘴巴,嘴角,舌头,胡须,尾巴状态,身体姿势,毛发状态,尾巴毛发状态,爪子位置,所处的场景],给出每个识别项的检测结果，并根据这些识别项的结果，从[愤怒、悲伤、惊慌、平静、开心、满足、兴奋、好奇]中选取一个最高可能性的进行一个整体的情绪判断，然后给眼睛、嘴巴、胡须、耳朵的状态和给出的情绪的相关程度进行打分（百分制），最后给出情绪的判断理由，并提供和该宠物的互动建议。特别注意：所有这些都以json格式输出，主键分别是：detectionResults(内部主键是识别项的名称，无须转换英文),emotion,correlationScore(内部的主键为mouth,eyes,ears,whiskers),reason,suggestion!",
-            "category": f"你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其概率（可能性由高到低给出三种），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！注意petCategoryName的值要是中文（务必保证宠物类别的中英转化要准确）。"
+            "category": f"你是专业的宠物品种分析专家，请根据图片识别出该宠物可能的品种及其百分比概率（可能性由高到低给出三种,三种概率之和为100%），给出可能性最高的品种判断的理由，并给出可能性最高的品种的起源与发展、寿命与体格的简单介绍，请使用json格式输出，主键分别是：petCategoryName、percentage、origin、physique、analyse、recognizeDetailList,其中recognizeDetailList中的主键是petCategoryName和percentage！注意petCategoryName的值要是中文（务必保证宠物类别的中英转化要准确）。"
         }
         scene = client_data.get("scene",  "")
         session_id = client_data.get("recognizeId", "")
