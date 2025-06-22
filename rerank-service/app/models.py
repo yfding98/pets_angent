@@ -7,6 +7,7 @@ class BGERerankerWrapper:
     def __init__(self, model_path: str = "BAAI/bge-reranker-v2-m3"):
         self.device = os.getenv("DEVICE", "musa")  # 支持 CUDA/MUSA 设备
         self.use_fp16 = os.getenv("USE_FP16", "true").lower() == "true"  # FP16 推理
+        self.model_name = os.path.basename(model_path)
 
         # 初始化 reranker 模型
         self.model = FlagReranker(
